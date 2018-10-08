@@ -1,41 +1,34 @@
 package WAV;
 use strict;
 use warnings;
-use Carp qw(croak);
+
+use Carp 'croak';
 use Fcntl qw(O_CREAT O_RDONLY O_WRONLY SEEK_SET);
 
-
 use constant {
-    WAV_HDR_LEN        => 44, # size of a canonical wav header in bytes
-    WAV_MODE_READ      => 0,
-    WAV_MODE_WRITE     => 1,
-    WAV_FORMAT_PCM	   => 0x0001,
-    WAV_FORMAT_FLOAT   => 0x0003,
+    WAV_FORMAT_PCM     => 1,
+    WAV_FORMAT_FLOAT   => 3,
     MAX_SIGNED_INT_16  => 32767,
-    MAX_SIGNED_INT_24  => 8388608,
+    MAX_SIGNED_INT_24  => 8388607,
     MAX_SIGNED_INT_32  => 2147483647,
 };
 
 
 sub new {
-    my ($class, $arg_ref) = @_;
+    my $class = shift;
+    _check_args(@_);
+    my ($file, $mode, $samp_fmt, $num_chans, $samp_rate) = @_;
 
-    if (@_ < 2) {
-        croak "not enough arguments given";
+    my $self = bless { file => $file, hdr_len => 0, fh => undef }, $class;
+    
+    if ($mode eq 'r') {
+        $self->_init_read;
     }
-    elsif (ref $arg_ref ne 'HASH') {
-        croak 'not a hash reference';
-    }
-
-    _check_args($arg_ref);
-
-    my $self = bless {}, $class;
-
-    if ($arg_ref->{mode} eq 'r') {
-        $self->_init_read($arg_ref);
-    }
-    elsif ($arg_ref->{mode} eq 'w') {
-        $self->_init_write($arg_ref);
+    elsif ($mode eq 'w') {
+        $self->{samp_fmt } = $samp_fmt;
+        $self->{num_chans} = $num_chans;
+        $self->{samp_rate} = $samp_rate; 
+        $self->_init_write;
     }
 
     return $self;
@@ -43,92 +36,99 @@ sub new {
 
 
 sub _check_args {
-    my ($arg_ref) = @_;
+    my ($file, $mode, $samp_fmt, $num_chans, $samp_rate) = @_;
+    
+    
+    if (@_ < 1) {
+        croak "missing \$file and \$mode arguments!";
+    }
+    elsif (@_ < 2) {
+        croak "missing \$mode argument!";
+    }
+    
+    if ($mode ne 'r' && $mode ne 'w') {
+        croak "unrecognised \$mode argument: '$mode'!"; 
+    }
 
-    if (!exists $arg_ref->{file}) {
-        croak "no file parameter given";
-    }
-    elsif (!exists $arg_ref->{mode}) {
-        croak "no mode parameter given";
-    }
-    elsif ($arg_ref->{mode} ne 'r' && $arg_ref->{mode} ne 'w') {
-        croak "unrecognised mode given (should be 'r' or 'w')";
-    }
-
-    if ($arg_ref->{mode} eq 'w') {
-        if (!exists $arg_ref->{samp_rate}) {
-            croak "no samp_rate parameter given\n";
+    if ($mode eq 'w') {
+        if (@_ < 3) {
+            croak "missing \$samp_fmt, \$num_chans"
+                . " and \$samp_rate arguments!";
         }
-        elsif (!exists $arg_ref->{num_chans}) {
-            croak "no num_chans parameter given\n";
+        elsif (@_ < 4) {
+            croak "missing \$num_chans and \$samp_rate arguments!";
         }
-        elsif (!exists $arg_ref->{format}) {
-            croak "no format parameter given\n";
+        elsif (@_ < 5) {
+            croak "missing \$samp_rate argument!";
         }
-        elsif ($arg_ref->{format} ne 'pcm_16' && $arg_ref->{format} ne 'pcm_24'
-               && $arg_ref->{format} ne 'pcm_32' && $arg_ref->{format} ne 'float')
-        {
-            croak "unrecognised format given (can be 'pcm_16', "
-                    . "'pcm_24', 'pcm_32' or 'float')"; 
-        }	
+        
+        if (!grep { $samp_fmt eq $_ } qw/pcm_16 pcm_24 pcm_32 float/) {
+            croak "unrecognised \$samp_fmt value: '$samp_fmt'!"; 
+        }
+        elsif ($num_chans < 1 || $num_chans > 2) {
+            croak "'$num_chans' channels of audio not supported!";
+        }
+        elsif ($samp_rate < 1) {
+            croak "\$samp_rate argument value must be positive!";
+        }
     }
 }
 
 
 sub _init_read {
-	my ($self, $arg_ref) = @_;
-	
-    sysopen $self->{fh}, $arg_ref->{file}, O_CREAT | O_RDONLY or croak "$!";
+    my ($self) = @_;
+
+    sysopen $self->{fh}, $self->{file}, O_CREAT | O_RDONLY
+         or croak "couldn't open $self->{file} for reading $!";
 
     $self->{is_writable} = 0;
 
-    $self->_read_hdr();
+    $self->_read_hdr;
 }
 
 
 sub _init_write {
-    my ($self, $arg_ref) = @_;
+    my ($self) = @_;
 
-    sysopen $self->{fh}, $arg_ref->{file}, O_CREAT | O_WRONLY or croak "$!";
-
-    if ($arg_ref->{format} eq 'pcm_16') {
+    sysopen $self->{fh}, $self->{file}, O_CREAT | O_WRONLY
+         or croak "couldn't open $self->{file} for writing $!";
+    
+    my $format = $self->{samp_fmt};
+    if ($format eq 'pcm_16') {
         $self->{num_bits} = 16;
-        $self->{pack_str} = 's<*';
+        $self->{pack_str} = 'v!*';
         $self->{max_int } = MAX_SIGNED_INT_16;
     }
-    elsif ($arg_ref->{format} eq 'pcm_24') {
+    elsif ($format eq 'pcm_24') {
         $self->{num_bits} = 24;
         $self->{max_int } = MAX_SIGNED_INT_24;
     }
-    elsif ($arg_ref->{format} eq 'pcm_32') {
+    elsif ($format eq 'pcm_32') {
         $self->{num_bits} = 32;
-        $self->{pack_str} = 'l<*';
+        $self->{pack_str} = 'V!*';
         $self->{max_int } = MAX_SIGNED_INT_32;
     }
-    elsif ($arg_ref->{format} eq 'float') {
+    elsif ($format eq 'float') {
         $self->{num_bits} = 32;
-        $self->{pack_str} = 'f*';
+        $self->{pack_str} = 'f<*';
     }
 
-    $self->{format} = $arg_ref->{format};
-
-    $self->{samp_rate  } = $arg_ref->{samp_rate};
-    $self->{num_chans  } = $arg_ref->{num_chans};
     $self->{align      } = $self->{num_chans} * ($self->{num_bits} / 8);
     $self->{is_writable} = 1;
 
     # construct & write a dummy header to disk
     # will be over written later
-    $self->{hdr_len} = $self->{format} eq 'float' ? 58 : 44;
-	
-    my $hdr = "Z" x $self->{hdr_len};
-    my $buf = pack "A*", $hdr;
+    $self->{hdr_len} = $self->{samp_fmt} eq 'float' ? 58 : 44;
 
-    syswrite $self->{fh}, $buf;
+    my $hdr = "Z" x $self->{hdr_len};
+    my $buf = pack "a*", $hdr;
+
+    syswrite $self->{fh}, $buf
+          or croak "couldn't write the dummy WAV file header $!";
 }
 
 
-#   Parse a wav file header, checking and extracting relevant
+#   Parse a WAV file header, checking and extracting relevant
 #   information from the RIFF, fmt and data chunks. Any optional chunks
 #   (e.g cue, fact, plst, adlt, etc) are skipped. 
 sub _read_hdr {
@@ -136,31 +136,40 @@ sub _read_hdr {
 
     my $buf;
     my $is_riff = 0;
-	
+    
+    DECODE_CHUNK:
     while (1) {
-        sysread $self->{fh}, $buf, 8;
-        my ($chunk_id, $chunk_len) = unpack 'A4V', $buf;
+        sysread $self->{fh}, $buf, 8
+             or croak "couldn't read WAV header chunk $!";
+        $self->{hdr_len} += 8;
+        my ($chunk_id, $chunk_len) = unpack 'a4V', $buf;
         if ($chunk_id eq 'RIFF') {
             $is_riff = 1;
-            # check that we've got a wav file
-            sysread $self->{fh}, $buf, 4 or croak "$!";
-            if (unpack 'A4', $buf ne 'WAVE') {
+            # check that we've got a WAV file
+            sysread $self->{fh}, $buf, 4
+                 or croak "couldn't read 'WAVE' chunk $!";
+            $self->{hdr_len} += 4;
+            if (unpack 'a4', $buf ne 'WAVE') {
                 croak "not a WAV file";
             } 
         }
-        elsif ($chunk_id eq 'fmt') { # why doesn't $chunk_id eq 'fmt ' work?
-            sysread $self->{fh}, $buf, $chunk_len;
+        elsif ($chunk_id eq 'fmt ') {
+            sysread $self->{fh}, $buf, $chunk_len
+                 or croak "couldn't read 'fmt ' chunk $!";
+            $self->{hdr_len} += $chunk_len;
             $self->_decode_fmt_chk($buf);		
         }
         elsif ($chunk_id eq 'data') {
             $self->{data_size } = $chunk_len;
             $self->{num_frames} = $self->{data_size} / $self->{align};
-            last;
+            last DECODE_CHUNK;
         }
-        elsif ($chunk_id =~ /[\w\s]{3}/i) {
+        elsif ($chunk_id =~ /[\w\s]{4}/i) {
             # skip any chunks we're not interested in
             if ($is_riff) {
-                sysread $self->{fh}, $buf, $chunk_len or croak "$!";
+                $self->{hdr_len} += $chunk_len;
+                sysread $self->{fh}, $buf, $chunk_len 
+                     or croak "couldn't read uninteresting chunk $!";
             }
         }
         elsif (!$is_riff) {
@@ -178,26 +187,24 @@ sub _decode_fmt_chk {
     my ($self, $buf) = @_;
 
     # extract relevant information
-    @{ $self }{ qw/code num_chans samp_rate bits_per_sec align num_bits/ }
-        = unpack '(ssllss)<', $buf;
-				
+    @$self{ qw/code num_chans samp_rate bits_per_sec align num_bits/ }
+        = unpack 'vvVVvv', $buf;
+
     if ($self->{code} == WAV_FORMAT_PCM) {
-        if ($self->{num_bits} < 16 && $self->{num_bits} > 32
-            && $self->{num_bits} % 8 != 0)
-        {
-            croak 'unsupported bit depth';
+        if ($self->{num_bits} < 16 && $self->{num_bits} > 32) {
+            croak 'unsupported sample bit depth';
         }
     }
     elsif ($self->{code} == WAV_FORMAT_FLOAT) {
         if ($self->{num_bits} != 32) {
-            croak 'unsupported bit depth';
+            croak 'unsupported sample bit depth';
         }
     }
     else {
-        croak 'unsupported format';
+        croak 'unsupported sample format';
     }
-		
-    $self->_set_read_attrs();
+
+    $self->_set_read_attrs;
 }
 
 
@@ -206,41 +213,81 @@ sub _set_read_attrs {
 
     if ($self->{code} == WAV_FORMAT_PCM) {
         if ($self->{num_bits} == 16) {
-            $self->{format  } = 'pcm_16';
-            $self->{pack_str} = 's<*';
+            $self->{samp_fmt} = 'pcm_16';
+            $self->{pack_str} = 'v!*';
             $self->{max_int } = MAX_SIGNED_INT_16;
         }
         elsif ($self->{num_bits} == 24) {
-            $self->{format  } = 'pcm_24';
+            $self->{samp_fmt} = 'pcm_24';
             $self->{max_int } = MAX_SIGNED_INT_24;
         }
         elsif ($self->{num_bits} == 32) {
-            $self->{format  } = 'pcm_32';
-            $self->{pack_str} = 'l<*';
+            $self->{samp_fmt} = 'pcm_32';
+            $self->{pack_str} = 'V!*';
             $self->{max_int } = MAX_SIGNED_INT_32;
         }
     }
     elsif ($self->{code} == WAV_FORMAT_FLOAT) {
-        $self->{format  } = 'float';
-        $self->{pack_str} = 'f*';
+        $self->{samp_fmt} = 'float';
+        $self->{pack_str} = 'f<*';
     }
-
+    
     $self->{bytes_read} = 0;
 }
 
 
-sub read_floats_a {
+sub read_floats_str {
+    my ($self, $num_frames) = @_;
+    
+    if (@_ < 2) {
+        croak "missing \$num_frames argument!";
+    }
+    elsif ($num_frames < 1 && $num_frames > $self->{num_frames}) {
+        croak "\$num_frames argument is out of bounds!";
+    }
+    
+    my ($frames, $buf);
+    if ($self->{samp_fmt} eq 'float') {
+        $num_frames *= $self->{align};
+
+        # read audio frames into $buf
+        my $num_bytes;
+        $num_bytes = sysread $self->{fh}, $buf, $num_frames
+                          or croak "couldn't read audio frames $!";
+
+        $self->{bytes_read} += $num_bytes;
+
+        if ($self->{bytes_read} > $self->{data_size}) {
+            $buf = substr
+                $buf,
+                0,
+                $num_bytes - ($self->{bytes_read} - $self->{data_size});
+        }
+    }
+    elsif ($frames = $self->read_floats_aref($num_frames)) {
+        $buf = pack 'f<*', @$frames;
+    }
+    
+    return length $buf ? $buf : '';
+}
+
+
+sub read_floats_aref {
     my ($self, $num_frames) = @_;
 
     if (@_ < 2) {
-        croak "error: not enough arguments given";
+        croak "missing \$num_frames argument!";
+    }
+    elsif ($num_frames < 1 && $num_frames > $self->{num_frames}) {
+        croak "\$num_frames argument is out of bounds!";
     }
 
     $num_frames *= $self->{align};
 
     # read audio frames into $buf
     my ($num_bytes, $buf);
-    $num_bytes = sysread $self->{fh}, $buf, $num_frames // croak "$!";
+    $num_bytes = sysread $self->{fh}, $buf, $num_frames
+                      // croak "couldn't read audio frames $!";
 
     $self->{bytes_read} += $num_bytes;
 
@@ -249,114 +296,153 @@ sub read_floats_a {
             $buf,
             0,
             $num_bytes - ($self->{bytes_read} - $self->{data_size});
-	}
-	
-    my @samps;
-    if ($self->{format} ne 'pcm_24') {
-        @samps = unpack $self->{pack_str}, $buf;
+    }
+
+    my @frames;
+    if ($self->{samp_fmt} ne 'pcm_24') {
+        @frames = unpack $self->{pack_str}, $buf;
     }
     else { # unpack little endian 24bit signed ints
-        @samps = unpack 'l<*', pack '(a3x)*', unpack '(a3)*', $buf;
+        @frames = map { unpack('V!', qq[\x00$_]) / 256 } unpack '(a3)*', $buf;
     }
 
     # rescale audio data to between -1.0 & +1.0
-    if (index($self->{format}, 'pcm') != -1) {
+    if (index($self->{samp_fmt}, 'pcm') != -1) {
         my $max_int = $self->{max_int};
-        for my $v (@samps) {
-            $v /= $max_int;
+        for my $s (@frames) {
+            $s /= $max_int;
         }
     }
 
-    return $num_bytes ? \@samps : '';
+    return $num_bytes ? \@frames : '';
 }
 
 
-#	Constructs a canonical wav file header and writes it to disk.
+# Constructs a canonical WAV file header and writes it to disk.
 sub _write_hdr {
-	my ($self) = @_;
+    my ($self) = @_;
 
     $self->{num_frames} = $self->{data_size} / $self->{align};
 
-    my $needs_padding = 0;
-    
-    if ($self->{num_frames} % 2 != 2) { #check this is correct
-        $self->{hdr_len}++;
-        $needs_padding = 1;
-    }
-
     my $buf;
     # construct the RIFF chunk
-    $buf  = pack 'A4V', 'RIFF', $self->{data_size} + $self->{hdr_len} - 8;
-    $buf .= pack 'A4', 'WAVE';
+    $buf  = pack 'a4V', 'RIFF', $self->{data_size} + $self->{hdr_len} - 8;
+    $buf .= pack 'a4', 'WAVE';
 
     # construct the fmt subchunk
     $buf .= pack
-        'A4VvvVVvv',
+        'a4VvvVVvv',
         'fmt ',
-        $self->{format} eq 'float' ? 18 : 16, 
-        $self->{format} eq 'float' ? WAV_FORMAT_FLOAT : WAV_FORMAT_PCM,
+        $self->{samp_fmt} eq 'float' ? 18 : 16, 
+        $self->{samp_fmt} eq 'float' ? WAV_FORMAT_FLOAT : WAV_FORMAT_PCM,
         $self->{num_chans},
         $self->{samp_rate},
         $self->{samp_rate} * $self->{align},
         $self->{align},
         $self->{num_bits};
 
-    if ($self->{format}	eq 'float') {
-        $buf .= pack 'v', 0;
+    if ($self->{samp_fmt}	eq 'float') {
+        $buf .= pack 'v', 0;   # not all parsers do this
         # construct the fact subchunk
         $buf .= pack
-            'A4VV', 
+            'a4VV', 
             'fact',
             4,
             $self->{num_frames};
     }
 
     # construct the data subchunk
-    my $data = 'A4V';
-
-    if ($needs_padding) {
-        $data .= 'x';
-    }
+    my $data = 'a4V';
 
     $buf .= pack $data, 'data', $self->{data_size};
 	
-    syswrite $self->{fh}, $buf or croak "$!";
+    syswrite $self->{fh}, $buf 
+          or croak "couldn't write WAV file header $!";
 }
 
 
-sub write_floats_a {
-    my ($self, $samps_ref) = @_;
+sub write_floats_str {
+    my ($self, $buf) = @_;
     
     if (@_ < 2) {
-        croak "not enough arguments given";
+        croak "missing \$buf argument!";
     }
-    elsif (ref $samps_ref ne 'ARRAY') {
-        croak "argument not an array reference";
+    
+    my @frames = unpack "f<*", $buf;
+    
+    return $self->write_floats_aref(\@frames);
+    
+}
+
+
+sub write_floats_aref {
+    my ($self, $frames) = @_;
+    
+    if (@_ < 2) {
+        croak "missing '$frames' argument!";
+    }
+    elsif (ref $frames ne 'ARRAY') {
+        croak "\$frames_aref argument not an array reference!";
     }
 
     # rescale PCM data to between -$max_int & +$max_int
-    if (index($self->{format}, 'pcm') != -1) {
+    if (index($self->{samp_fmt}, 'pcm') != -1) {
         my $max_int = $self->{max_int};
-        for my $v (@{ $samps_ref }) {
+        for my $v (@$frames) {
             $v *= $max_int;
         }
     }
 
     my $buf;
-    if ($self->{format} ne 'pcm_24') {
-        $buf = pack $self->{pack_str}, @{ $samps_ref };
+    if ($self->{samp_fmt} ne 'pcm_24') {
+        $buf = pack $self->{pack_str}, @$frames;
     }
     else { # unpack little endian 24bit signed ints
-        $buf = join '', unpack '(a3x)*', pack 'l<*', @{ $samps_ref };
+        $buf = pack '(V!X)*', @$frames;
     }
 
     my $num_bytes = length $buf;
 
     $self->{data_size} += $num_bytes;
-
-    syswrite $self->{fh}, $buf or croak "$!";
+    
+    syswrite($self->{fh}, $buf)
+          or croak "couldn't write audio frames $!";
 
     return $num_bytes / $self->{align};
+}
+
+
+sub move_to {
+    my ($self, $offset) = @_;
+    
+    if (@_ < 2) {
+        croak "missing \$offset argument!";
+    }
+    
+    # convert $offset to bytes
+    $offset *= $self->{align};
+    
+    if ($offset < 0 && $offset > $self->{data_size}) {
+        croak "\$offset value out of bounds!";
+    }
+    
+    $offset += $self->{hdr_len};
+    
+    my $pos = sysseek $self->{fh}, $offset, SEEK_SET
+                   or croak "couldn't seek to byte $offset offset $!";
+                   
+    $pos -= $self->{hdr_len};
+    
+    return $pos / $self->{align}; # new frame position offset
+}
+
+
+sub frame_pos {
+    my ($self) = @_;
+    
+    my $pos = sysseek $self->{fh}, 0, 1 // -1;
+    
+    return $pos > 0 ? ($pos - $self->{hdr_len}) / $self->{align} : -1;
 }
 
 
@@ -390,19 +476,20 @@ sub duration {
 }
 
 
-sub format {
-    return $_[0]->{format};
+sub samp_fmt {
+    return $_[0]->{samp_fmt};
 }
 
 
 sub finish {
     my ($self) = @_;
 
-    if ($self->{is_writable}) {
-        sysseek $self->{fh}, 0, SEEK_SET or croak "$!";
-        $self->_write_hdr();
+    if ($self->{is_writable} && $self->{data_size}) {
+        sysseek $self->{fh}, 0, SEEK_SET
+             or croak "couldn't SEEK to begining of file $!";
+        $self->_write_hdr;
     }
-	
+
     if ($self->{fh}) {
         close $self->{fh};
     }
@@ -415,7 +502,7 @@ sub DESTROY {
     my ($self) = @_;
     
     if (!exists $self->{finished}) {
-        $self->finish();
+        $self->finish;
     }
 }
 
@@ -431,75 +518,110 @@ __END__
 
 =head1 VERSION
 
- VERSION 0.0001
+ VERSION 0.0002
 
 =head1 SYNOPSIS
 
  use WAV;
  
- # create a Wav object for reading
- my $wf_in = WAV->new({ file => 'in.wav', mode => 'r' });
+ # create a WAV object for reading
+ my $wf_in = WAV->new('in.wav', 'r');
  
- # create a Wav object for writing
- my $wf_out = WAV->new({ 
-     file      => 'out.wav', 
-     mode      => 'w', 
-     num_chans => $wf_in->num_chans, 
-     samp_rate => $wf_in->samp_rate, 
-     format    => 'float', 
- });
+ # create a WAV object for writing
+ my $wf_out = WAV->new(
+    'out.wav',
+    'w',
+    $in->samp_fmt,
+    $in->num_chans,
+    $in->samp_rate
+ );
+ 
+ # move file handle to frame 40000
+ $wf_in->move_to(40000);
  
  # processing loop
- while (my $frames_ref = $wf->read_floats_a(1024)) { # read chunk
+ while (my $frames = $wf_in->read_floats_aref(1024)) { # read chunk of audio
      ##################################
      # can do further processing here #
      ##################################
-     $wf_out->write_floats_a($frames_ref); # write chunk
+     $wf_out->write_floats_aref($frames); # write chunk of audio
  }
 
 =head1 DESCRIPTION
 
  A module for reading and writing mono/stereo uncompressed WAV files.
- The following uncompressed formats are currently supported: 16, 24,
- 32 bit integers and 32 bit floats.
+ The following uncompressed formats are supported: 16, 24 and 32 bit
+ signed integers and 32 bit floats.
 
 =head1 CONSTRUCTOR
 
-=head2 new($hash_ref_of_named_args)
+=head2 new($file, $mode, $samp_fmt, $num_chans, $samp_rate)
 
- Creates a WAV object for reading or writing WAV files. It takes a hash
- reference of named arguments. 
+ Creates a WAV object for reading or writing WAV files. 
  
- For reading WAV files, 'file' and 'mode' arguments must be given. The 
- 'mode' argument should be given the value 'r'.
+ For reading and writing WAV files, '$file' and '$mode' arguments must be
+ given. When reading the '$mode' argument should be given the value 'r' and
+ when writing it should be given the value 'w'.  
  
- For writing WAV files, 'file', 'mode', 'num_chans', 'samp_rate' and
- 'format' arguments must be given. The mode argument should be given the
- value 'w'. The 'format' argument accepts the following strings as values:
- 'pcm_16', 'pcm_24', 'pcm_32' and 'float'. 
+ When writing WAV files three additional arguments need to be supplied.
+ They are:
+ 
+ $samp_fmt  - the sample format. This can be given one of the following
+              strings as values: 'pcm_16', 'pcm_24' or 'pcm_32' for signed 
+              integers or 'float' for 32 bit floats.
+ 
+ $num_chans - number of channels of audio per frame. This can be given
+              the value of 1 or 2 for mono and stereo respectively.
+              
+ $samp_rate - the sample rate in Hertz.
  
  If there was a problem creating the object this method will croak.
 
 =head1 METHODS
 
-=head2 read_floats_a($num_frames)
+=head2 read_floats_aref($num_frames)
 
  Reads $num_frames and returns a reference to an array containing floating
  point frames. Any conversions from ints to floats are done automatically.
  Returns false when there are no more frames to be read. This method will
- croak if there was a problem reading the data. 
+ croak if there was a problem reading the data.
+ 
+=head2 read_floats_str($num_frames)
 
-=head2 write_floats_a($frames_ref)
+ Same as the read_floats_aref method except that it returns a packed
+ binary string instead of an array reference. The audio data in the
+ binary string will be packed as 32 bit floats.
+
+=head2 write_floats_aref($frames_ref)
 
  Takes a reference to an array of audio frames (floats), converting them to 
  ints if necessary, then writes them to disk. The number of frames written
  is returned. This method will croak if there was a problem writing the 
  data.
+ 
+=head2 write_floats_str($buf)
 
+ Same as the write_floats_aref method accept that it takes a packed binary
+ string as an argument instead of an array reference. The audio data in the
+ binary string should be packed as 32 bit floats.
+ 
+=head2 move_to($offset)
+
+ Moves the file handle to the given $offset. Note that the $offset value is
+ expressed as frames. Also, giving $offset a value of 0 will move the file 
+ handle to the begining of the audio data and not the begining of the WAV
+ file. This method returns the new frame position if it was succesful and
+ will croak otherwise.
+ 
+=head2 frame_pos()
+
+ Returns the current frame position of the file handle.
+ 
 =head2 finish()
 
  Closes the file handle and flushes any unwritten data to disk. This method 
- will be called by the destructor.
+ will be called by the destructor but there may be occassions when you need
+ to call this method explicitly. 
 
 =head2 num_chans()
 
