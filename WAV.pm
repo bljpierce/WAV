@@ -2,7 +2,7 @@ package WAV;
 use strict;
 use warnings;
 
-use Carp 'croak';
+us[1;5Ce Carp 'croak';
 use Fcntl qw(O_CREAT O_RDONLY O_WRONLY SEEK_SET);
 
 use constant {
@@ -579,7 +579,7 @@ __END__
  $samp_fmt  - the sample format. This can be given one of the following
               strings as values: 'pcm_16', 'pcm_24' or 'pcm_32' for signed 
               integers, 'float' for 32 bit floats and 'pcm_8' for an 8 bit
-              signed integer.
+              unsigned integer.
  
  $num_chans - number of channels of audio per frame. This can be given
               the value of 1 or 2 for mono and stereo respectively.
