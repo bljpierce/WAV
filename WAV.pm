@@ -8,6 +8,7 @@ use Fcntl qw(O_CREAT O_RDONLY O_WRONLY SEEK_SET);
 use constant {
     WAV_FORMAT_PCM     => 1,
     WAV_FORMAT_FLOAT   => 3,
+    MAX_UNSIGNED_INT_8 => 255,
     MAX_SIGNED_INT_16  => 32767,
     MAX_SIGNED_INT_24  => 8388607,
     MAX_SIGNED_INT_32  => 2147483647,
@@ -62,7 +63,7 @@ sub _check_args {
             croak 'missing $samp_rate argument!';
         }
         
-        if (!grep { $samp_fmt eq $_ } qw/pcm_16 pcm_24 pcm_32 float/) {
+        if (!grep { $samp_fmt eq $_ } qw/pcm_8 pcm_16 pcm_24 pcm_32 float/) {
             croak "unrecognised \$samp_fmt value: '$samp_fmt'!"; 
         }
         elsif ($num_chans < 1 || $num_chans > 2) {
@@ -79,7 +80,7 @@ sub _init_read {
     my ($self) = @_;
 
     sysopen $self->{fh}, $self->{file}, O_RDONLY
-         or croak "couldn't open $self->{file} for reading $!";
+         // croak "couldn't open $self->{file} for reading $!";
 
     $self->{is_writable} = 0;
 
@@ -91,10 +92,15 @@ sub _init_write {
     my ($self) = @_;
 
     sysopen $self->{fh}, $self->{file}, O_CREAT | O_WRONLY
-         or croak "couldn't open $self->{file} for writing $!";
+         // croak "couldn't open $self->{file} for writing $!";
     
     my $format = $self->{samp_fmt};
-    if ($format eq 'pcm_16') {
+    if ($format eq 'pcm_8') {
+        $self->{num_bits} = 8;
+        $self->{pack_str} = 'C*';
+        $self->{max_int } = MAX_UNSIGNED_INT_8;
+    }
+    elsif ($format eq 'pcm_16') {
         $self->{num_bits} = 16;
         $self->{pack_str} = 'v!*';
         $self->{max_int } = MAX_SIGNED_INT_16;
@@ -124,7 +130,7 @@ sub _init_write {
     my $buf = pack "a*", $hdr;
 
     syswrite $self->{fh}, $buf
-          or croak "couldn't write the dummy WAV file header $!";
+          // croak "couldn't write the dummy WAV file header $!";
 }
 
 
@@ -140,14 +146,14 @@ sub _read_hdr {
     DECODE_CHUNK:
     while (1) {
         sysread $self->{fh}, $buf, 8
-             or croak "couldn't read WAV header chunk $!";
+             // croak "couldn't read WAV header chunk $!";
         $self->{hdr_len} += 8;
         my ($chunk_id, $chunk_len) = unpack 'a4V', $buf;
         if ($chunk_id eq 'RIFF') {
             $is_riff = 1;
             # check that we've got a WAV file
             sysread $self->{fh}, $buf, 4
-                 or croak "couldn't read 'WAVE' chunk $!";
+                 // croak "couldn't read 'WAVE' chunk $!";
             $self->{hdr_len} += 4;
             if (unpack 'a4', $buf ne 'WAVE') {
                 croak "not a WAV file";
@@ -155,7 +161,7 @@ sub _read_hdr {
         }
         elsif ($chunk_id eq 'fmt ') {
             sysread $self->{fh}, $buf, $chunk_len
-                 or croak "couldn't read 'fmt ' chunk $!";
+                 // croak "couldn't read 'fmt ' chunk $!";
             $self->{hdr_len} += $chunk_len;
             $self->_decode_fmt_chk($buf);		
         }
@@ -169,7 +175,7 @@ sub _read_hdr {
             if ($is_riff) {
                 $self->{hdr_len} += $chunk_len;
                 sysread $self->{fh}, $buf, $chunk_len 
-                     or croak "couldn't read uninteresting chunk $!";
+                     // croak "couldn't read uninteresting chunk $!";
             }
         }
         elsif (!$is_riff) {
@@ -191,7 +197,7 @@ sub _decode_fmt_chk {
         = unpack 'vvVVvv', $buf;
 
     if ($self->{code} == WAV_FORMAT_PCM) {
-        if ($self->{num_bits} < 16 && $self->{num_bits} > 32) {
+        if ($self->{num_bits} < 8 && $self->{num_bits} > 32) {
             croak 'unsupported sample bit depth';
         }
     }
@@ -212,7 +218,12 @@ sub _set_read_attrs {
     my ($self) = @_;
 
     if ($self->{code} == WAV_FORMAT_PCM) {
-        if ($self->{num_bits} == 16) {
+        if ($self->{num_bits} == 8) {
+            $self->{samp_fmt} = 'pcm_8';
+            $self->{pack_str} = 'C*';
+            $self->{max_int } = MAX_UNSIGNED_INT_8;
+        }
+        elsif ($self->{num_bits} == 16) {
             $self->{samp_fmt} = 'pcm_16';
             $self->{pack_str} = 'v!*';
             $self->{max_int } = MAX_SIGNED_INT_16;
@@ -253,7 +264,7 @@ sub read_floats_str {
         # read audio frames into $buf
         my $num_bytes;
         $num_bytes = sysread $self->{fh}, $buf, $num_frames
-                          or croak "couldn't read audio frames $!";
+                          // croak "couldn't read audio frames $!";
 
         $self->{bytes_read} += $num_bytes;
 
@@ -287,7 +298,7 @@ sub read_floats_aref {
     # read audio frames into $buf
     my ($num_bytes, $buf);
     $num_bytes = sysread $self->{fh}, $buf, $num_frames
-                      or croak "couldn't read audio frames $!";
+                      // croak "couldn't read audio frames $!";
 
     $self->{bytes_read} += $num_bytes;
 
@@ -357,7 +368,7 @@ sub _write_hdr {
     $buf .= pack $data, 'data', $self->{data_size};
 	
     syswrite $self->{fh}, $buf 
-          or croak "couldn't write WAV file header $!";
+          // croak "couldn't write WAV file header $!";
 }
 
 
@@ -404,8 +415,8 @@ sub write_floats_aref {
 
     $self->{data_size} += $num_bytes;
     
-    syswrite($self->{fh}, $buf)
-          or croak "couldn't write audio frames $!";
+    syswrite $self->{fh}, $buf
+          // croak "couldn't write audio frames $!";
 
     return $num_bytes / $self->{align};
 }
@@ -422,13 +433,13 @@ sub move_to {
     $offset *= $self->{align};
     
     if ($offset < 0 && $offset > $self->{data_size}) {
-        croak "\$offset value out of bounds!";
+        croak '$offset value out of bounds!';
     }
     
     $offset += $self->{hdr_len};
     
     my $pos = sysseek $self->{fh}, $offset, SEEK_SET
-                   or croak "couldn't seek to byte $offset offset $!";
+                   // croak "couldn't seek to byte $offset offset $!";
                    
     $pos -= $self->{hdr_len};
     
@@ -485,7 +496,7 @@ sub finish {
 
     if ($self->{is_writable} && $self->{data_size}) {
         sysseek $self->{fh}, 0, SEEK_SET
-             or croak "couldn't SEEK to begining of file $!";
+             // croak "couldn't SEEK to begining of file $!";
         $self->_write_hdr;
     }
 
@@ -517,7 +528,7 @@ __END__
 
 =head1 VERSION
 
- VERSION 0.0002
+ VERSION 0.0003
 
 =head1 SYNOPSIS
 
@@ -550,7 +561,7 @@ __END__
 
  A module for reading and writing mono/stereo uncompressed WAV files.
  The following uncompressed formats are supported: 16, 24 and 32 bit
- signed integers and 32 bit floats.
+ signed integers, 32 bit floats and 8 bit unsigned integers.
 
 =head1 CONSTRUCTOR
 
@@ -567,7 +578,8 @@ __END__
  
  $samp_fmt  - the sample format. This can be given one of the following
               strings as values: 'pcm_16', 'pcm_24' or 'pcm_32' for signed 
-              integers or 'float' for 32 bit floats.
+              integers, 'float' for 32 bit floats and 'pcm_8' for an 8 bit
+              signed integer.
  
  $num_chans - number of channels of audio per frame. This can be given
               the value of 1 or 2 for mono and stereo respectively.
