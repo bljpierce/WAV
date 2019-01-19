@@ -40,10 +40,10 @@ sub _check_args {
     
     
     if (@_ < 1) {
-        croak "missing \$file and \$mode arguments!";
+        croak 'missing $file and $mode arguments!';
     }
     elsif (@_ < 2) {
-        croak "missing \$mode argument!";
+        croak 'missing $mode argument!';
     }
     
     if ($mode ne 'r' && $mode ne 'w') {
@@ -52,14 +52,14 @@ sub _check_args {
 
     if ($mode eq 'w') {
         if (@_ < 3) {
-            croak "missing \$samp_fmt, \$num_chans"
-                . " and \$samp_rate arguments!";
+            croak 'missing $samp_fmt, $num_chans'
+                . ' and $samp_rate arguments!';
         }
         elsif (@_ < 4) {
-            croak "missing \$num_chans and \$samp_rate arguments!";
+            croak 'missing $num_chans and $samp_rate arguments!';
         }
         elsif (@_ < 5) {
-            croak "missing \$samp_rate argument!";
+            croak 'missing $samp_rate argument!';
         }
         
         if (!grep { $samp_fmt eq $_ } qw/pcm_16 pcm_24 pcm_32 float/) {
@@ -69,7 +69,7 @@ sub _check_args {
             croak "'$num_chans' channels of audio not supported!";
         }
         elsif ($samp_rate < 1) {
-            croak "\$samp_rate argument value must be positive!";
+            croak '$samp_rate argument value must be positive!';
         }
     }
 }
@@ -240,10 +240,10 @@ sub read_floats_str {
     my ($self, $num_frames) = @_;
     
     if (@_ < 2) {
-        croak "missing \$num_frames argument!";
+        croak 'missing $num_frames argument!';
     }
     elsif ($num_frames < 1 && $num_frames > $self->{num_frames}) {
-        croak "\$num_frames argument is out of bounds!";
+        croak '$num_frames argument is out of bounds!';
     }
     
     my ($frames, $buf);
@@ -276,10 +276,10 @@ sub read_floats_aref {
     my ($self, $num_frames) = @_;
 
     if (@_ < 2) {
-        croak "missing \$num_frames argument!";
+        croak 'missing $num_frames argument!';
     }
     elsif ($num_frames < 1 && $num_frames > $self->{num_frames}) {
-        croak "\$num_frames argument is out of bounds!";
+        croak '$num_frames argument is out of bounds!';
     }
 
     $num_frames *= $self->{align};
@@ -365,13 +365,12 @@ sub write_floats_str {
     my ($self, $buf) = @_;
     
     if (@_ < 2) {
-        croak "missing \$buf argument!";
+        croak 'missing $buf argument!';
     }
     
     my @frames = unpack "f<*", $buf;
     
     return $self->write_floats_aref(\@frames);
-    
 }
 
 
@@ -379,10 +378,10 @@ sub write_floats_aref {
     my ($self, $frames) = @_;
     
     if (@_ < 2) {
-        croak "missing '$frames' argument!";
+        croak 'missing $frames argument!';
     }
     elsif (ref $frames ne 'ARRAY') {
-        croak "\$frames_aref argument not an array reference!";
+        croak '$frames argument not an array reference!';
     }
 
     # rescale PCM data to between -$max_int & +$max_int
@@ -397,7 +396,7 @@ sub write_floats_aref {
     if ($self->{samp_fmt} ne 'pcm_24') {
         $buf = pack $self->{pack_str}, @$frames;
     }
-    else { # unpack little endian 24bit signed ints
+    else { # pack little endian 24bit signed ints
         $buf = pack '(V!X)*', @$frames;
     }
 
@@ -416,7 +415,7 @@ sub move_to {
     my ($self, $offset) = @_;
     
     if (@_ < 2) {
-        croak "missing \$offset argument!";
+        croak 'missing $offset argument!';
     }
     
     # convert $offset to bytes
