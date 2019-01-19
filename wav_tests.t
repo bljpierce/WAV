@@ -6,7 +6,7 @@ use warnings;
 
 use lib '.';
 use WAV;
-use Test::More tests => 46;
+use Test::More tests => 59;
 use File::Temp 'tempdir';
 
 my $dir = tempdir( CLEANUP => 1 );
@@ -131,3 +131,34 @@ $w = WAV->new($file, 'w', 'float', 1, 44100);
 $frames = $r->read_floats_str(1024);
 
 ok length $frames == 4096, 'read 1024 frames (4096 bytes) into packed string';
+
+$r = WAV->new('sine_8_44100_mono.wav', 'r');
+
+ok ref $r eq 'WAV', 'object is a WAV';
+# check WAV headr is parsed correctly
+ok $r->num_chans  == 1,        'num_chans is 1';
+ok $r->samp_rate  == 44100,    'samp_rate is 44100';
+ok $r->num_frames == 22050,    'num_frames is 22050';
+ok $r->samp_fmt   eq 'pcm_8',  'samp_fmt is pcm_8';
+ok $r->num_bits   == 8,        'num_bits is 8';
+
+# check reading works
+$frames = $r->read_floats_aref(512);
+ok ref $frames eq 'ARRAY', 'got an aref';
+ok @$frames    == 512,     'read 512 frames into aref';
+
+# create WAV object for writing
+$file = "$dir/" . 'sine_temp.wav';
+$w = WAV->new($file, 'w', 'pcm_8', 1, 44100);
+
+ok ref $w eq 'WAV', 'object is a WAV';
+
+# check writing works
+$frames = $r->read_floats_aref(11025);
+$w->write_floats_aref($frames);
+$w->finish;
+
+ok $w->num_frames == 11025,    'num_frames is 11025';
+ok $w->num_chans  == 1,        'num_chans is 1';
+ok $w->samp_fmt   eq 'pcm_8', 'samp_fmt is pcm_8';
+ok $w->samp_rate  == 44100,    'samp_rate is 44100';
