@@ -78,7 +78,7 @@ sub _check_args {
 sub _init_read {
     my ($self) = @_;
 
-    sysopen $self->{fh}, $self->{file}, O_CREAT | O_RDONLY
+    sysopen $self->{fh}, $self->{file}, O_RDONLY
          or croak "couldn't open $self->{file} for reading $!";
 
     $self->{is_writable} = 0;
@@ -287,7 +287,7 @@ sub read_floats_aref {
     # read audio frames into $buf
     my ($num_bytes, $buf);
     $num_bytes = sysread $self->{fh}, $buf, $num_frames
-                      // croak "couldn't read audio frames $!";
+                      or croak "couldn't read audio frames $!";
 
     $self->{bytes_read} += $num_bytes;
 
@@ -439,7 +439,7 @@ sub move_to {
 sub frame_pos {
     my ($self) = @_;
     
-    my $pos = sysseek $self->{fh}, 0, 1 // -1;
+    my $pos = sysseek $self->{fh}, 0, 1 or -1;
     
     return $pos > 0 ? ($pos - $self->{hdr_len}) / $self->{align} : -1;
 }
