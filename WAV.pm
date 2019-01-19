@@ -439,7 +439,7 @@ sub move_to {
 sub frame_pos {
     my ($self) = @_;
     
-    my $pos = sysseek $self->{fh}, 0, 1 or -1;
+    my $pos = sysseek $self->{fh}, 0, 1 // -1;
     
     return $pos > 0 ? ($pos - $self->{hdr_len}) / $self->{align} : -1;
 }
