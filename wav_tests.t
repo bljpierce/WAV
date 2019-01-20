@@ -6,7 +6,7 @@ use warnings;
 
 use lib '.';
 use WAV;
-use Test::More tests => 59;
+use Test::More tests => 62;
 use File::Temp 'tempdir';
 
 my $dir = tempdir( CLEANUP => 1 );
@@ -162,3 +162,16 @@ ok $w->num_frames == 11025,    'num_frames is 11025';
 ok $w->num_chans  == 1,        'num_chans is 1';
 ok $w->samp_fmt   eq 'pcm_8', 'samp_fmt is pcm_8';
 ok $w->samp_rate  == 44100,    'samp_rate is 44100';
+
+# check read methods read entire WAV file
+$r = WAV->new('sine_8_44100_mono.wav', 'r');
+$frames = $r->read_floats_aref('all');
+ok @$frames    == 22050,     'read 22050 frames into aref';
+
+$r = WAV->new('sine_8_44100_mono.wav', 'r');
+$buf = $r->read_floats_str('all');
+ok length $buf == 88200, 'read 22050 frames (88200 bytes) into packed string';
+
+# check DESTROY
+$r->DESTROY;
+ok $r->{finished} == 1, 'DESTROY calls finish()';
