@@ -2,8 +2,9 @@ package WAV;
 use strict;
 use warnings;
 
-us[1;5Ce Carp 'croak';
+use Carp 'croak';
 use Fcntl qw(O_CREAT O_RDONLY O_WRONLY SEEK_SET);
+use Scalar::Util 'looks_like_number';
 
 use constant {
     WAV_FORMAT_PCM     => 1,
@@ -253,8 +254,14 @@ sub read_floats_str {
     if (@_ < 2) {
         croak 'missing $num_frames argument!';
     }
-    elsif ($num_frames < 1 && $num_frames > $self->{num_frames}) {
-        croak '$num_frames argument is out of bounds!';
+    elsif (looks_like_number($num_frames)) {
+        if ($num_frames < 1 && $num_frames > $self->{num_frames}) {
+            croak '$num_frames argument is out of bounds!';
+        }
+    }
+    
+    if ($num_frames eq 'all') {
+        $num_frames = $self->num_frames;
     }
     
     my ($frames, $buf);
@@ -289,8 +296,14 @@ sub read_floats_aref {
     if (@_ < 2) {
         croak 'missing $num_frames argument!';
     }
-    elsif ($num_frames < 1 && $num_frames > $self->{num_frames}) {
-        croak '$num_frames argument is out of bounds!';
+    elsif (looks_like_number($num_frames)) {
+        if ($num_frames < 1 && $num_frames > $self->{num_frames}) {
+            croak '$num_frames argument is out of bounds!';
+        }
+    }
+    
+    if ($num_frames eq 'all') {
+        $num_frames = $self->num_frames;
     }
 
     $num_frames *= $self->{align};
@@ -594,8 +607,9 @@ __END__
 
  Reads $num_frames and returns a reference to an array containing floating
  point frames. Any conversions from ints to floats are done automatically.
- Returns false when there are no more frames to be read. This method will
- croak if there was a problem reading the data.
+ Returns false when there are no more frames to be read. If $num_frames is
+ given the string value 'all' the entire WAV file will be read in one go. 
+ This method will croak if there was a problem reading the data.
  
 =head2 read_floats_str($num_frames)
 
